@@ -105,7 +105,9 @@ function parseTournamentRows(csvText) {
 }
 
 async function loadTournamentData() {
-  const response = await fetch(CONFIG.RESULTS_CSV_URL, {
+  const cacheBustingUrl = `${CONFIG.RESULTS_CSV_URL}${CONFIG.RESULTS_CSV_URL.includes("?") ? "&" : "?"}t=${Date.now()}`;
+
+  const response = await fetch(cacheBustingUrl, {
     cache: "no-store",
   });
 
