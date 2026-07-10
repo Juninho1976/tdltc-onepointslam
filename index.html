@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="TDLTC One Point Slam tournament results from a published Google Sheet."
+      content="TDLTC One Point Slam live tournament scoreboard from a published Google Sheet."
     />
     <title>TDLTC One Point Slam</title>
     <link rel="stylesheet" href="styles.css" />
@@ -16,22 +16,41 @@
         <p class="eyebrow">Tournament updates</p>
         <h1 id="tournament-title">TDLTC One Point Slam</h1>
         <p class="lead">
-          Live tournament results are loaded from a published Google Sheet.
+          A live scoreboard-style view of tournament activity from the published Google Sheet.
         </p>
       </header>
 
       <main class="content">
-        <section class="panel" aria-labelledby="results-heading">
-          <div class="panel-header">
-            <h2 id="results-heading">Latest Results</h2>
-            <p class="helper-text">
-              Matches are grouped by round and refreshed automatically.
-            </p>
+        <section class="panel spotlight-panel" aria-labelledby="live-heading">
+          <div class="section-heading">
+            <p class="section-label">Section 1</p>
+            <h2 id="live-heading">LIVE NOW</h2>
           </div>
+          <div id="live-match" class="spotlight-card"></div>
+        </section>
 
-          <div id="results" class="results-container" aria-live="polite">
-            <p class="loading-state">Loading tournament data...</p>
+        <section class="panel" aria-labelledby="next-heading">
+          <div class="section-heading">
+            <p class="section-label">Section 2</p>
+            <h2 id="next-heading">NEXT MATCH</h2>
           </div>
+          <div id="next-match" class="mini-card"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="progress-heading">
+          <div class="section-heading">
+            <p class="section-label">Section 3</p>
+            <h2 id="progress-heading">TOURNAMENT PROGRESS</h2>
+          </div>
+          <div id="progress-summary" class="progress-list"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="draw-heading">
+          <div class="section-heading">
+            <p class="section-label">Section 4</p>
+            <h2 id="draw-heading">TOURNAMENT DRAW</h2>
+          </div>
+          <div id="draw" class="draw-list"></div>
         </section>
       </main>
     </div>
