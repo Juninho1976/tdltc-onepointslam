@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="TDLTC One Point Slam tournament results from a published Google Sheet."
+    />
+    <title>TDLTC One Point Slam</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">Tournament updates</p>
+        <h1 id="tournament-title">TDLTC One Point Slam</h1>
+        <p class="lead">
+          Live tournament results are loaded from a published Google Sheet.
+        </p>
+      </header>
+
+      <main class="content">
+        <section class="panel" aria-labelledby="results-heading">
+          <div class="panel-header">
+            <h2 id="results-heading">Latest Results</h2>
+            <p class="helper-text">
+              Matches are grouped by round and refreshed automatically.
+            </p>
+          </div>
+
+          <div id="results" class="results-container" aria-live="polite">
+            <p class="loading-state">Loading tournament data...</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
