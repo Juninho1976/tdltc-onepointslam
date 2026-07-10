@@ -113,26 +113,30 @@ function parseTournamentRows(csvText) {
     });
 }
 
-function loadTournamentData() {
-  var cacheBustingUrl =
-    CONFIG.RESULTS_CSV_URL +
-    (CONFIG.RESULTS_CSV_URL.indexOf("?") !== -1 ? "&" : "?") +
-    "t=" +
-    Date.now();
+var hasLoadedResults = false;
 
-  return fetch(cacheBustingUrl, {
-    cache: "no-store",
-  }).then(function (response) {
-    if (!response.ok) {
-      throw new Error("Unable to fetch tournament data (" + response.status + ")");
-    }
-    return response.text();
-  }).then(function (csvText) {
-    return parseTournamentRows(csvText);
-  });
+function setStatusMessage(message, type) {
+  var banner = document.getElementById("status-banner");
+  if (!banner) {
+    return;
+  }
+
+  banner.textContent = message || "";
+  banner.className = type ? "status-banner " + type : "status-banner";
+}
+
+function clearStatusMessage() {
+  setStatusMessage("", "");
 }
 
 function showLoadingState() {
+  if (hasLoadedResults) {
+    setStatusMessage("Refreshing results...");
+    return;
+  }
+
+  setStatusMessage("Loading tournament data...");
+
   var liveMatch = document.getElementById("live-match");
   var nextMatch = document.getElementById("next-match");
   var progressSummary = document.getElementById("progress-summary");
@@ -156,6 +160,12 @@ function showLoadingState() {
 }
 
 function showErrorState(message) {
+  setStatusMessage(message, "status-warning");
+
+  if (hasLoadedResults) {
+    return;
+  }
+
   var liveMatch = document.getElementById("live-match");
   var nextMatch = document.getElementById("next-match");
   var progressSummary = document.getElementById("progress-summary");
@@ -425,7 +435,9 @@ function renderResults(data) {
   document.title = CONFIG.TOURNAMENT_NAME;
 
   if (!Array.isArray(data) || data.length === 0) {
-    showErrorState("No tournament data is available yet.");
+    if (!hasLoadedResults) {
+      showErrorState("No tournament data is available yet.");
+    }
     return;
   }
 
@@ -433,14 +445,30 @@ function renderResults(data) {
   renderNextMatch(data);
   renderProgressSummary(data);
   renderTournamentDraw(data);
+
+  hasLoadedResults = true;
+
+  var now = new Date();
+  var timeLabel = now.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  setStatusMessage("Last updated: " + timeLabel, "status-success");
 }
 
 function refreshTournamentData() {
+  if (!hasLoadedResults) {
+    showLoadingState();
+  } else {
+    setStatusMessage("Refreshing results...");
+  }
+
   loadTournamentData().then(function (tournamentData) {
     renderResults(tournamentData);
   }).catch(function (error) {
     console.error("Failed to load tournament data:", error);
-    showErrorState("The tournament sheet could not be reached right now. Please try again soon.");
+    showErrorState("Unable to refresh tournament data. Retaining current results.");
   });
 }
 

@@ -38,6 +38,25 @@ body {
   box-shadow: var(--shadow);
 }
 
+.status-banner {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  background: #eef4ff;
+  color: #1d3a7d;
+  font-size: 0.95rem;
+}
+
+.status-banner.status-warning {
+  background: #fff4f1;
+  color: #9f2d2f;
+}
+
+.status-banner.status-success {
+  background: #eef7ec;
+  color: #236028;
+}
+
 .eyebrow {
   margin: 0 0 0.35rem;
   color: var(--accent);
