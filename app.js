@@ -115,6 +115,152 @@ function parseTournamentRows(csvText) {
 
 var hasLoadedResults = false;
 
+// Global handlers for uncaught errors and promise rejections so we never stay on "Loading"
+window.addEventListener && window.addEventListener("unhandledrejection", function (evt) {
+  try {
+    console.error("Unhandled promise rejection:", evt && evt.reason);
+    setStatusMessage("An unexpected error occurred. See console for details.", "status-warning");
+    if (!hasLoadedResults) {
+      showErrorState("Unexpected error while loading data.");
+    }
+  } catch (e) {
+    console.error("Error in unhandledrejection handler:", e);
+  }
+});
+
+window.addEventListener && window.addEventListener("error", function (evt) {
+  try {
+    console.error("Uncaught error:", evt && (evt.error || evt.message));
+    setStatusMessage("An unexpected error occurred. See console for details.", "status-warning");
+    if (!hasLoadedResults) {
+      showErrorState("Unexpected error while loading data.");
+    }
+  } catch (e) {
+    console.error("Error in error handler:", e);
+  }
+});
+
+/**
+ * Load tournament data CSV with diagnostics and timeout.
+ * Returns a Promise that resolves to parsed rows array.
+ */
+function loadTournamentData() {
+  return new Promise(function (resolve, reject) {
+    var stage = "init";
+    var startedAt = Date.now();
+    var url = (typeof CONFIG !== "undefined" && CONFIG.RESULTS_CSV_URL) ? CONFIG.RESULTS_CSV_URL : null;
+
+    if (!url) {
+      var err = new Error("No CSV URL configured (CONFIG.RESULTS_CSV_URL)");
+      console.error(err);
+      showErrorState("Configuration error: missing CSV URL.");
+      return reject(err);
+    }
+
+    // Track progress to report if we stall
+    var stallTimer = setTimeout(function () {
+      var elapsed = Math.round((Date.now() - startedAt) / 1000);
+      var msg = "Loading stalled (" + stage + ") after " + elapsed + "s";
+      console.warn(msg);
+      setStatusMessage(msg, "status-warning");
+      if (!hasLoadedResults) {
+        showErrorState("Loading stalled while fetching tournament data. Please try again.");
+      }
+    }, 10000);
+
+    stage = "fetching";
+    console.log("[diagnostic] Fetching CSV from:", url);
+    setStatusMessage("Fetching data...");
+
+    var controller = null;
+    var timerId = null;
+    try {
+      controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    } catch (e) {
+      controller = null;
+    }
+
+    // add a cache-busting param and keep same semantics as before
+    var fetchUrl = url + (url.indexOf("?") === -1 ? "?" : "&") + "t=" + Date.now();
+
+    var fetchOptions = { method: "GET" };
+    if (controller && controller.signal) {
+      fetchOptions.signal = controller.signal;
+    }
+
+    var fetchStart = Date.now();
+
+    // 10s timeout
+    timerId = setTimeout(function () {
+      try {
+        if (controller && controller.abort) {
+          controller.abort();
+        }
+      } catch (e) {
+        console.warn("Abort failed:", e);
+      }
+    }, 10000);
+
+    // perform fetch
+    try {
+      window.fetch(fetchUrl, fetchOptions).then(function (response) {
+        clearTimeout(timerId);
+        stage = "received";
+        var tookMs = Date.now() - fetchStart;
+        console.log("[diagnostic] Fetch completed: status=", response.status, "tookMs=", tookMs);
+
+        if (!response || !response.ok) {
+          var msg = "CSV fetch returned HTTP " + (response && response.status);
+          console.error(msg);
+          clearTimeout(stallTimer);
+          showErrorState("The tournament sheet could not be reached (HTTP " + (response && response.status) + ").");
+          return reject(new Error(msg));
+        }
+
+        stage = "reading";
+        // read as text
+        response.text().then(function (text) {
+          stage = "parsing";
+          console.log("[diagnostic] Received CSV length:", text ? text.length : 0);
+          var parsed = [];
+          try {
+            parsed = parseTournamentRows(text || "");
+          } catch (err) {
+            console.error("CSV parse error:", err);
+            clearTimeout(stallTimer);
+            showErrorState("Failed to parse tournament data.");
+            return reject(err);
+          }
+
+          console.log("[diagnostic] Parsed rows:", parsed.length);
+          clearTimeout(stallTimer);
+          stage = "done";
+          setStatusMessage("Fetched " + parsed.length + " rows", "status-success");
+          return resolve(parsed);
+        }).catch(function (err) {
+          console.error("Error reading response text:", err);
+          clearTimeout(stallTimer);
+          showErrorState("Failed to read tournament data.");
+          return reject(err);
+        });
+      }).catch(function (err) {
+        clearTimeout(timerId);
+        clearTimeout(stallTimer);
+        console.error("Fetch failed:", err);
+        var message = (err && err.name === "AbortError") ? "Request timed out." : "Network error while fetching data.";
+        showErrorState(message);
+        return reject(err);
+      });
+    } catch (err) {
+      clearTimeout(timerId);
+      clearTimeout(stallTimer);
+      console.error("Unexpected error during fetch:", err);
+      showErrorState("Unexpected error while fetching data.");
+      return reject(err);
+    }
+  });
+}
+
 function setStatusMessage(message, type) {
   var banner = document.getElementById("status-banner");
   if (!banner) {
@@ -441,10 +587,14 @@ function renderResults(data) {
     return;
   }
 
+  console.log("[diagnostic] Rendering results: rows=", data.length);
+
   renderLiveMatch(data);
   renderNextMatch(data);
   renderProgressSummary(data);
   renderTournamentDraw(data);
+
+  console.log("[diagnostic] Finished rendering results");
 
   hasLoadedResults = true;
 
@@ -464,8 +614,15 @@ function refreshTournamentData() {
     setStatusMessage("Refreshing results...");
   }
 
+  console.log("[diagnostic] refreshTournamentData: starting loadTournamentData()");
   loadTournamentData().then(function (tournamentData) {
-    renderResults(tournamentData);
+    console.log("[diagnostic] refreshTournamentData: loadTournamentData resolved, rows=", (tournamentData && tournamentData.length) || 0);
+    try {
+      renderResults(tournamentData);
+    } catch (err) {
+      console.error("Error during renderResults:", err);
+      showErrorState("Rendering error. See console for details.");
+    }
   }).catch(function (error) {
     console.error("Failed to load tournament data:", error);
     showErrorState("Unable to refresh tournament data. Retaining current results.");
