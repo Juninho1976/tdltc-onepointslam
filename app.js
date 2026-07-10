@@ -114,6 +114,35 @@ function parseTournamentRows(csvText) {
 }
 
 var hasLoadedResults = false;
+var pollingIntervalId = null;
+var latestRequestId = 0;
+var lastRenderedRequestId = 0;
+
+function buildDataSummary(matches) {
+  if (!Array.isArray(matches)) {
+    return "no data";
+  }
+
+  var rowCount = matches.length;
+  var liveMatch = null;
+  var nextMatch = null;
+
+  for (var i = 0; i < matches.length; i += 1) {
+    var status = normalizeStatus(matches[i].status);
+    if (!liveMatch && status === "live") {
+      liveMatch = matches[i];
+    }
+    if (!nextMatch && status === "scheduled") {
+      nextMatch = matches[i];
+    }
+  }
+
+  return (
+    "rows=" + rowCount +
+    ", live=" + (liveMatch ? liveMatch.match || "unknown" : "none") +
+    ", next=" + (nextMatch ? nextMatch.match || "unknown" : "none")
+  );
+}
 
 // Global handlers for uncaught errors and promise rejections so we never stay on "Loading"
 window.addEventListener && window.addEventListener("unhandledrejection", function (evt) {
@@ -144,11 +173,12 @@ window.addEventListener && window.addEventListener("error", function (evt) {
  * Load tournament data CSV with diagnostics and timeout.
  * Returns a Promise that resolves to parsed rows array.
  */
-function loadTournamentData() {
+function loadTournamentData(requestId) {
   return new Promise(function (resolve, reject) {
     var stage = "init";
     var startedAt = Date.now();
     var url = (typeof CONFIG !== "undefined" && CONFIG.RESULTS_CSV_URL) ? CONFIG.RESULTS_CSV_URL : null;
+    console.log("[diagnostic] loadTournamentData requestId=", requestId, "started at", new Date(startedAt).toISOString());
 
     if (!url) {
       var err = new Error("No CSV URL configured (CONFIG.RESULTS_CSV_URL)");
@@ -159,6 +189,9 @@ function loadTournamentData() {
 
     // Track progress to report if we stall
     var stallTimer = setTimeout(function () {
+      if (requestId !== latestRequestId) {
+        return;
+      }
       var elapsed = Math.round((Date.now() - startedAt) / 1000);
       var msg = "Loading stalled (" + stage + ") after " + elapsed + "s";
       console.warn(msg);
@@ -170,7 +203,9 @@ function loadTournamentData() {
 
     stage = "fetching";
     console.log("[diagnostic] Fetching CSV from:", url);
-    setStatusMessage("Fetching data...");
+    if (requestId === latestRequestId) {
+      setStatusMessage("Fetching data...");
+    }
 
     var controller = null;
     var timerId = null;
@@ -213,7 +248,9 @@ function loadTournamentData() {
           var msg = "CSV fetch returned HTTP " + (response && response.status);
           console.error(msg);
           clearTimeout(stallTimer);
-          showErrorState("The tournament sheet could not be reached (HTTP " + (response && response.status) + ").");
+          if (requestId === latestRequestId) {
+            showErrorState("The tournament sheet could not be reached (HTTP " + (response && response.status) + ").");
+          }
           return reject(new Error(msg));
         }
 
@@ -228,34 +265,49 @@ function loadTournamentData() {
           } catch (err) {
             console.error("CSV parse error:", err);
             clearTimeout(stallTimer);
-            showErrorState("Failed to parse tournament data.");
+            if (requestId === latestRequestId) {
+              showErrorState("Failed to parse tournament data.");
+            }
             return reject(err);
           }
 
-          console.log("[diagnostic] Parsed rows:", parsed.length);
+          console.log("[diagnostic] Parsed rows:", parsed.length, "for requestId=", requestId);
           clearTimeout(stallTimer);
           stage = "done";
-          setStatusMessage("Fetched " + parsed.length + " rows", "status-success");
-          return resolve(parsed);
+          if (requestId === latestRequestId) {
+            setStatusMessage("Fetched " + parsed.length + " rows", "status-success");
+          }
+          return resolve({
+            requestId: requestId,
+            fetchedAt: fetchStart,
+            completedAt: Date.now(),
+            rows: parsed,
+          });
         }).catch(function (err) {
-          console.error("Error reading response text:", err);
+          console.error("Error reading response text for requestId=", requestId, err);
           clearTimeout(stallTimer);
-          showErrorState("Failed to read tournament data.");
+          if (requestId === latestRequestId) {
+            showErrorState("Failed to read tournament data.");
+          }
           return reject(err);
         });
       }).catch(function (err) {
         clearTimeout(timerId);
         clearTimeout(stallTimer);
-        console.error("Fetch failed:", err);
+        console.error("Fetch failed for requestId=", requestId, err);
         var message = (err && err.name === "AbortError") ? "Request timed out." : "Network error while fetching data.";
-        showErrorState(message);
+        if (requestId === latestRequestId) {
+          showErrorState(message);
+        }
         return reject(err);
       });
     } catch (err) {
       clearTimeout(timerId);
       clearTimeout(stallTimer);
-      console.error("Unexpected error during fetch:", err);
-      showErrorState("Unexpected error while fetching data.");
+      console.error("Unexpected error during fetch for requestId=", requestId, err);
+      if (requestId === latestRequestId) {
+        showErrorState("Unexpected error while fetching data.");
+      }
       return reject(err);
     }
   });
@@ -572,7 +624,8 @@ function renderTournamentDraw(matches) {
   container.innerHTML = sectionsHtml;
 }
 
-function renderResults(data) {
+function renderResults(data, requestId, fetchedAt) {
+  console.log("[diagnostic] renderResults requestId=", requestId, "fetchedAt=", new Date(fetchedAt).toISOString(), "rows=", data.length, "summary=", buildDataSummary(data));
   var titleElement = document.getElementById("tournament-title");
   if (titleElement) {
     titleElement.textContent = CONFIG.TOURNAMENT_NAME;
@@ -581,21 +634,28 @@ function renderResults(data) {
   document.title = CONFIG.TOURNAMENT_NAME;
 
   if (!Array.isArray(data) || data.length === 0) {
+    console.log("[diagnostic] renderResults no data for requestId=", requestId);
     if (!hasLoadedResults) {
       showErrorState("No tournament data is available yet.");
     }
     return;
   }
 
-  console.log("[diagnostic] Rendering results: rows=", data.length);
+  if (requestId < lastRenderedRequestId) {
+    console.warn("[diagnostic] renderResults ignoring stale requestId=", requestId, "lastRenderedRequestId=", lastRenderedRequestId);
+    return;
+  }
+
+  console.log("[diagnostic] Rendering results: rows=", data.length, "requestId=", requestId);
 
   renderLiveMatch(data);
   renderNextMatch(data);
   renderProgressSummary(data);
   renderTournamentDraw(data);
 
-  console.log("[diagnostic] Finished rendering results");
+  console.log("[diagnostic] Finished rendering results for requestId=", requestId);
 
+  lastRenderedRequestId = requestId;
   hasLoadedResults = true;
 
   var now = new Date();
@@ -614,18 +674,33 @@ function refreshTournamentData() {
     setStatusMessage("Refreshing results...");
   }
 
-  console.log("[diagnostic] refreshTournamentData: starting loadTournamentData()");
-  loadTournamentData().then(function (tournamentData) {
-    console.log("[diagnostic] refreshTournamentData: loadTournamentData resolved, rows=", (tournamentData && tournamentData.length) || 0);
+  latestRequestId += 1;
+  var requestId = latestRequestId;
+  var requestStart = Date.now();
+  console.log("[diagnostic] refreshTournamentData: starting loadTournamentData requestId=", requestId, "at", new Date(requestStart).toISOString());
+  loadTournamentData(requestId).then(function (result) {
+    console.log("[diagnostic] refreshTournamentData: loadTournamentData resolved requestId=", result.requestId, "rows=", (result.rows && result.rows.length) || 0, "elapsedMs=", Date.now() - requestStart);
+    if (result.requestId !== latestRequestId) {
+      console.warn("[diagnostic] Ignoring stale response requestId=", result.requestId, "latestRequestId=", latestRequestId);
+      return;
+    }
     try {
-      renderResults(tournamentData);
+      renderResults(result.rows, result.requestId, result.fetchedAt);
     } catch (err) {
       console.error("Error during renderResults:", err);
       showErrorState("Rendering error. See console for details.");
     }
   }).catch(function (error) {
-    console.error("Failed to load tournament data:", error);
-    showErrorState("Unable to refresh tournament data. Retaining current results.");
+    console.error("Failed to load tournament data for requestId=", requestId, error);
+    if (requestId !== latestRequestId) {
+      console.warn("[diagnostic] Ignoring stale error for requestId=", requestId, "latestRequestId=", latestRequestId);
+      return;
+    }
+    if (!hasLoadedResults) {
+      showErrorState("Unable to refresh tournament data. Please try again.");
+    } else {
+      setStatusMessage("Unable to refresh tournament data. Retaining current results.", "status-warning");
+    }
   });
 }
 
@@ -634,6 +709,11 @@ document.addEventListener("DOMContentLoaded", function () {
   refreshTournamentData();
 
   if (CONFIG.REFRESH_INTERVAL_MS > 0) {
-    window.setInterval(refreshTournamentData, CONFIG.REFRESH_INTERVAL_MS);
+    if (pollingIntervalId) {
+      window.clearInterval(pollingIntervalId);
+      pollingIntervalId = null;
+    }
+    pollingIntervalId = window.setInterval(refreshTournamentData, CONFIG.REFRESH_INTERVAL_MS);
+    console.log("[diagnostic] Polling interval started, id=", pollingIntervalId, "intervalMs=", CONFIG.REFRESH_INTERVAL_MS);
   }
 });
