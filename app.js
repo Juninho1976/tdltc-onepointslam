@@ -8,14 +8,14 @@ function escapeHtml(value) {
 }
 
 function parseCsv(csvText) {
-  const rows = [];
-  let currentRow = [];
-  let currentValue = "";
-  let inQuotes = false;
+  var rows = [];
+  var currentRow = [];
+  var currentValue = "";
+  var inQuotes = false;
 
-  for (let i = 0; i < csvText.length; i += 1) {
-    const char = csvText[i];
-    const nextChar = csvText[i + 1];
+  for (var i = 0; i < csvText.length; i += 1) {
+    var char = csvText[i];
+    var nextChar = csvText[i + 1];
 
     if (char === '"') {
       if (inQuotes && nextChar === '"') {
@@ -64,8 +64,9 @@ function normalizeHeader(header) {
 }
 
 function getValueFromRecord(record, aliases) {
-  for (const alias of aliases) {
-    const normalizedAlias = normalizeHeader(alias);
+  for (var i = 0; i < aliases.length; i += 1) {
+    var alias = aliases[i];
+    var normalizedAlias = normalizeHeader(alias);
     if (record[normalizedAlias] !== undefined) {
       return record[normalizedAlias];
     }
@@ -75,24 +76,32 @@ function getValueFromRecord(record, aliases) {
 }
 
 function parseTournamentRows(csvText) {
-  const rows = parseCsv(csvText);
+  var rows = parseCsv(csvText);
 
   if (rows.length === 0) {
     return [];
   }
 
-  const [headerRow, ...dataRows] = rows;
-  const headers = headerRow.map((value) => normalizeHeader(value));
+  var headerRow = rows[0];
+  var dataRows = rows.slice(1);
+  var headers = headerRow.map(function (value) {
+    return normalizeHeader(value);
+  });
 
   return dataRows
-    .filter((row) => row.some((cell) => String(cell).trim() !== ""))
-    .map((row) => {
-      const record = {};
-
-      headers.forEach((header, index) => {
-        record[header] = row[index] || "";
-      });
-
+    .filter(function (row) {
+      for (var i = 0; i < row.length; i += 1) {
+        if (String(row[i]).trim() !== "") {
+          return true;
+        }
+      }
+      return false;
+    })
+    .map(function (row) {
+      var record = {};
+      for (var index = 0; index < headers.length; index += 1) {
+        record[headers[index]] = row[index] || "";
+      }
       return {
         match: getValueFromRecord(record, ["match", "matchnumber", "match #"]),
         round: getValueFromRecord(record, ["round", "roundname", "stage"]),
@@ -104,26 +113,30 @@ function parseTournamentRows(csvText) {
     });
 }
 
-async function loadTournamentData() {
-  const cacheBustingUrl = `${CONFIG.RESULTS_CSV_URL}${CONFIG.RESULTS_CSV_URL.includes("?") ? "&" : "?"}t=${Date.now()}`;
+function loadTournamentData() {
+  var cacheBustingUrl =
+    CONFIG.RESULTS_CSV_URL +
+    (CONFIG.RESULTS_CSV_URL.indexOf("?") !== -1 ? "&" : "?") +
+    "t=" +
+    Date.now();
 
-  const response = await fetch(cacheBustingUrl, {
+  return fetch(cacheBustingUrl, {
     cache: "no-store",
+  }).then(function (response) {
+    if (!response.ok) {
+      throw new Error("Unable to fetch tournament data (" + response.status + ")");
+    }
+    return response.text();
+  }).then(function (csvText) {
+    return parseTournamentRows(csvText);
   });
-
-  if (!response.ok) {
-    throw new Error(`Unable to fetch tournament data (${response.status})`);
-  }
-
-  const csvText = await response.text();
-  return parseTournamentRows(csvText);
 }
 
 function showLoadingState() {
-  const liveMatch = document.getElementById("live-match");
-  const nextMatch = document.getElementById("next-match");
-  const progressSummary = document.getElementById("progress-summary");
-  const draw = document.getElementById("draw");
+  var liveMatch = document.getElementById("live-match");
+  var nextMatch = document.getElementById("next-match");
+  var progressSummary = document.getElementById("progress-summary");
+  var draw = document.getElementById("draw");
 
   if (liveMatch) {
     liveMatch.innerHTML = '<p class="loading-state">Loading live scoreboard...</p>';
@@ -143,32 +156,32 @@ function showLoadingState() {
 }
 
 function showErrorState(message) {
-  const liveMatch = document.getElementById("live-match");
-  const nextMatch = document.getElementById("next-match");
-  const progressSummary = document.getElementById("progress-summary");
-  const draw = document.getElementById("draw");
+  var liveMatch = document.getElementById("live-match");
+  var nextMatch = document.getElementById("next-match");
+  var progressSummary = document.getElementById("progress-summary");
+  var draw = document.getElementById("draw");
 
   if (liveMatch) {
-    liveMatch.innerHTML = `<p class="empty-state">${escapeHtml(message)}</p>`;
+    liveMatch.innerHTML = '<p class="empty-state">' + escapeHtml(message) + '</p>';
   }
 
   if (nextMatch) {
-    nextMatch.innerHTML = `<p class="empty-state">${escapeHtml(message)}</p>`;
+    nextMatch.innerHTML = '<p class="empty-state">' + escapeHtml(message) + '</p>';
   }
 
   if (progressSummary) {
-    progressSummary.innerHTML = `<p class="empty-state">${escapeHtml(message)}</p>`;
+    progressSummary.innerHTML = '<p class="empty-state">' + escapeHtml(message) + '</p>';
   }
 
   if (draw) {
-    draw.innerHTML = `<p class="empty-state">${escapeHtml(message)}</p>`;
+    draw.innerHTML = '<p class="empty-state">' + escapeHtml(message) + '</p>';
   }
 }
 
 function formatRoundLabel(roundName) {
-  const cleaned = String(roundName || "").trim();
+  var cleaned = String(roundName || "").trim();
 
-  const roundLabels = {
+  var roundLabels = {
     r32: "Round of 32",
     roundof32: "Round of 32",
     r16: "Round of 16",
@@ -181,7 +194,7 @@ function formatRoundLabel(roundName) {
     final: "Final",
   };
 
-  const normalized = normalizeHeader(cleaned);
+  var normalized = normalizeHeader(cleaned);
   return roundLabels[normalized] || cleaned || "General";
 }
 
@@ -190,80 +203,90 @@ function normalizeStatus(status) {
 }
 
 function renderLiveMatch(matches) {
-  const container = document.getElementById("live-match");
+  var container = document.getElementById("live-match");
 
   if (!container) {
     return;
   }
 
-  const liveMatch = matches.find((match) => normalizeStatus(match.status) === "live");
+  var liveMatch = null;
+  for (var i = 0; i < matches.length; i += 1) {
+    if (normalizeStatus(matches[i].status) === "live") {
+      liveMatch = matches[i];
+      break;
+    }
+  }
 
   if (!liveMatch) {
     container.innerHTML = '<p class="empty-state">No match currently in progress.</p>';
     return;
   }
 
-  container.innerHTML = `
-    <article class="spotlight-card-inner">
-      <p class="status-pill live">Live now</p>
-      <p class="match-number">Match ${escapeHtml(liveMatch.match || "—")}</p>
-      <div class="match-versus">
-        <div class="player-block">
-          <p class="player-label">Player 1</p>
-          <p class="player-name">${escapeHtml(liveMatch.player1 || "—")}</p>
-        </div>
-        <div class="vs">VS</div>
-        <div class="player-block">
-          <p class="player-label">Player 2</p>
-          <p class="player-name">${escapeHtml(liveMatch.player2 || "—")}</p>
-        </div>
-      </div>
-    </article>
-  `;
+  container.innerHTML =
+    '<article class="spotlight-card-inner">' +
+    '  <p class="status-pill live">Live now</p>' +
+    '  <p class="match-number">Match ' + escapeHtml(liveMatch.match || "—") + '</p>' +
+    '  <div class="match-versus">' +
+    '    <div class="player-block">' +
+    '      <p class="player-label">Player 1</p>' +
+    '      <p class="player-name">' + escapeHtml(liveMatch.player1 || "—") + '</p>' +
+    '    </div>' +
+    '    <div class="vs">VS</div>' +
+    '    <div class="player-block">' +
+    '      <p class="player-label">Player 2</p>' +
+    '      <p class="player-name">' + escapeHtml(liveMatch.player2 || "—") + '</p>' +
+    '    </div>' +
+    '  </div>' +
+    '</article>';
 }
 
 function renderNextMatch(matches) {
-  const container = document.getElementById("next-match");
+  var container = document.getElementById("next-match");
 
   if (!container) {
     return;
   }
 
-  const nextMatch = matches.find((match) => normalizeStatus(match.status) === "scheduled");
+  var nextMatch = null;
+  for (var i = 0; i < matches.length; i += 1) {
+    if (normalizeStatus(matches[i].status) === "scheduled") {
+      nextMatch = matches[i];
+      break;
+    }
+  }
 
   if (!nextMatch) {
     container.innerHTML = '<p class="empty-state">No upcoming match scheduled.</p>';
     return;
   }
 
-  container.innerHTML = `
-    <article class="mini-card-inner">
-      <p class="status-pill">Next match</p>
-      <p class="match-number">Match ${escapeHtml(nextMatch.match || "—")}</p>
-      <div class="match-versus compact">
-        <div class="player-block">
-          <p class="player-label">Player 1</p>
-          <p class="player-name">${escapeHtml(nextMatch.player1 || "—")}</p>
-        </div>
-        <div class="vs">VS</div>
-        <div class="player-block">
-          <p class="player-label">Player 2</p>
-          <p class="player-name">${escapeHtml(nextMatch.player2 || "—")}</p>
-        </div>
-      </div>
-    </article>
-  `;
+  container.innerHTML =
+    '<article class="mini-card-inner">' +
+    '  <p class="status-pill">Next match</p>' +
+    '  <p class="match-number">Match ' + escapeHtml(nextMatch.match || "—") + '</p>' +
+    '  <div class="match-versus compact">' +
+    '    <div class="player-block">' +
+    '      <p class="player-label">Player 1</p>' +
+    '      <p class="player-name">' + escapeHtml(nextMatch.player1 || "—") + '</p>' +
+    '    </div>' +
+    '    <div class="vs">VS</div>' +
+    '    <div class="player-block">' +
+    '      <p class="player-label">Player 2</p>' +
+    '      <p class="player-name">' + escapeHtml(nextMatch.player2 || "—") + '</p>' +
+    '    </div>' +
+    '  </div>' +
+    '</article>';
 }
 
 function renderProgressSummary(matches) {
-  const container = document.getElementById("progress-summary");
+  var container = document.getElementById("progress-summary");
 
   if (!container) {
     return;
   }
 
-  const roundOrder = ["Round of 32", "Round of 16", "Quarter Finals", "Semi Finals", "Final"];
-  const totals = {
+  var roundOrder = ["Round of 32", "Round of 16", "Quarter Finals", "Semi Finals", "Final"];
+  var totals = {
     "Round of 32": 16,
     "Round of 16": 8,
     "Quarter Finals": 4,
@@ -271,91 +294,130 @@ function renderProgressSummary(matches) {
     Final: 1,
   };
 
-  const summary = roundOrder.map((roundLabel) => {
-    const matchesInRound = matches.filter((match) => formatRoundLabel(match.round) === roundLabel);
-    const completed = matchesInRound.filter((match) => {
-      const status = normalizeStatus(match.status);
-      return status === "complete" || status === "completed" || status === "finished" || status === "won" || status === "winner" || status === "final";
-    }).length;
+  var summaryHtml = "";
 
-    const total = totals[roundLabel] || matchesInRound.length || 0;
-    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+  for (var i = 0; i < roundOrder.length; i += 1) {
+    var roundLabel = roundOrder[i];
+    var matchesInRound = [];
 
-    return `
-      <div class="progress-item">
-        <div class="progress-header">
-          <span>${escapeHtml(roundLabel)}</span>
-          <span>${completed} / ${total} complete</span>
-        </div>
-        <div class="progress-bar" aria-hidden="true">
-          <div class="progress-bar-fill" style="width: ${progress}%"></div>
-        </div>
-      </div>
-    `;
-  });
+    for (var j = 0; j < matches.length; j += 1) {
+      if (formatRoundLabel(matches[j].round) === roundLabel) {
+        matchesInRound.push(matches[j]);
+      }
+    }
 
-  container.innerHTML = summary.join("");
+    var completed = 0;
+    for (var k = 0; k < matchesInRound.length; k += 1) {
+      var status = normalizeStatus(matchesInRound[k].status);
+      if (
+        status === "complete" ||
+        status === "completed" ||
+        status === "finished" ||
+        status === "won" ||
+        status === "winner" ||
+        status === "final"
+      ) {
+        completed += 1;
+      }
+    }
+
+    var total = totals[roundLabel] || matchesInRound.length || 0;
+    var progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    summaryHtml +=
+      '<div class="progress-item">' +
+      '  <div class="progress-header">' +
+      '    <span>' + escapeHtml(roundLabel) + '</span>' +
+      '    <span>' + completed + ' / ' + total + ' complete</span>' +
+      '  </div>' +
+      '  <div class="progress-bar" aria-hidden="true">' +
+      '    <div class="progress-bar-fill" style="width: ' + progress + '%"></div>' +
+      '  </div>' +
+      '</div>';
+  }
+
+  container.innerHTML = summaryHtml;
 }
 
 function renderTournamentDraw(matches) {
-  const container = document.getElementById("draw");
+  var container = document.getElementById("draw");
 
   if (!container) {
     return;
   }
 
-  const roundOrder = ["Round of 32", "Round of 16", "Quarter Finals", "Semi Finals", "Final"];
-  const grouped = roundOrder.map((roundLabel) => {
-    const items = matches.filter((match) => formatRoundLabel(match.round) === roundLabel);
-    return { roundLabel, items };
-  }).filter((group) => group.items.length > 0);
+  var roundOrder = ["Round of 32", "Round of 16", "Quarter Finals", "Semi Finals", "Final"];
+  var grouped = [];
+
+  for (var i = 0; i < roundOrder.length; i += 1) {
+    var roundLabel = roundOrder[i];
+    var items = [];
+
+    for (var j = 0; j < matches.length; j += 1) {
+      if (formatRoundLabel(matches[j].round) === roundLabel) {
+        items.push(matches[j]);
+      }
+    }
+
+    if (items.length > 0) {
+      grouped.push({ roundLabel: roundLabel, items: items });
+    }
+  }
 
   if (grouped.length === 0) {
     container.innerHTML = '<p class="empty-state">No tournament draw available yet.</p>';
     return;
   }
 
-  const sections = grouped.map((group) => {
-    const cards = group.items
-      .map((match) => {
-        const status = normalizeStatus(match.status);
-        const isLive = status === "live";
-        const isCompleted = status === "complete" || status === "completed" || status === "finished" || status === "won" || status === "winner" || status === "final";
-        const cardClass = `draw-card${isLive ? " live-card" : ""}${isCompleted ? " muted-card" : ""}`;
+  var sectionsHtml = "";
 
-        return `
-          <article class="${cardClass}">
-            <div class="draw-card-top">
-              <span class="match-chip">Match ${escapeHtml(match.match || "—")}</span>
-              <span class="status-chip">${escapeHtml((match.status || "Scheduled").trim() || "Scheduled")}</span>
-            </div>
-            <div class="draw-player-row">
-              <p class="draw-player">${escapeHtml(match.player1 || "—")}</p>
-              <p class="draw-vs">VS</p>
-              <p class="draw-player">${escapeHtml(match.player2 || "—")}</p>
-            </div>
-            <div class="draw-meta">
-              <p><span class="meta-label">Winner</span> ${escapeHtml(match.winner || "Pending")}</p>
-              <p><span class="meta-label">Status</span> ${escapeHtml(match.status || "Scheduled")}</p>
-            </div>
-          </article>
-        `;
-      })
-      .join("");
+  for (var g = 0; g < grouped.length; g += 1) {
+    var group = grouped[g];
+    var cardsHtml = "";
 
-    return `
-      <section class="draw-group">
-        <h3>${escapeHtml(group.roundLabel)}</h3>
-        <div class="draw-cards">${cards}</div>
-      </section>
-    `;
-  });
+    for (var m = 0; m < group.items.length; m += 1) {
+      var match = group.items[m];
+      var status = normalizeStatus(match.status);
+      var isLive = status === "live";
+      var isCompleted =
+        status === "complete" ||
+        status === "completed" ||
+        status === "finished" ||
+        status === "won" ||
+        status === "winner" ||
+        status === "final";
+      var cardClass = "draw-card" + (isLive ? " live-card" : "") + (isCompleted ? " muted-card" : "");
 
-  container.innerHTML = sections.join("");
+      cardsHtml +=
+        '<article class="' + cardClass + '">' +
+        '  <div class="draw-card-top">' +
+        '    <span class="match-chip">Match ' + escapeHtml(match.match || "—") + '</span>' +
+        '    <span class="status-chip">' + escapeHtml((match.status || "Scheduled").trim() || "Scheduled") + '</span>' +
+        '  </div>' +
+        '  <div class="draw-player-row">' +
+        '    <p class="draw-player">' + escapeHtml(match.player1 || "—") + '</p>' +
+        '    <p class="draw-vs">VS</p>' +
+        '    <p class="draw-player">' + escapeHtml(match.player2 || "—") + '</p>' +
+        '  </div>' +
+        '  <div class="draw-meta">' +
+        '    <p><span class="meta-label">Winner</span> ' + escapeHtml(match.winner || "Pending") + '</p>' +
+        '    <p><span class="meta-label">Status</span> ' + escapeHtml(match.status || "Scheduled") + '</p>' +
+        '  </div>' +
+        '</article>';
+    }
+
+    sectionsHtml +=
+      '<section class="draw-group">' +
+      '  <h3>' + escapeHtml(group.roundLabel) + '</h3>' +
+      '  <div class="draw-cards">' + cardsHtml + '</div>' +
+      '</section>';
+  }
+
+  container.innerHTML = sectionsHtml;
 }
 
 function renderResults(data) {
-  const titleElement = document.getElementById("tournament-title");
+  var titleElement = document.getElementById("tournament-title");
   if (titleElement) {
     titleElement.textContent = CONFIG.TOURNAMENT_NAME;
   }
@@ -373,17 +435,16 @@ function renderResults(data) {
   renderTournamentDraw(data);
 }
 
-async function refreshTournamentData() {
-  try {
-    const tournamentData = await loadTournamentData();
+function refreshTournamentData() {
+  loadTournamentData().then(function (tournamentData) {
     renderResults(tournamentData);
-  } catch (error) {
+  }).catch(function (error) {
     console.error("Failed to load tournament data:", error);
     showErrorState("The tournament sheet could not be reached right now. Please try again soon.");
-  }
+  });
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", function () {
   showLoadingState();
   refreshTournamentData();
 
