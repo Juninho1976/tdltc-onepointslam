@@ -1,11 +1,14 @@
 :root {
   color-scheme: light;
-  --bg: #f4f7fb;
+  --bg: #f3f6f8;
   --surface: #ffffff;
   --text: #14213d;
   --muted: #5f6b7a;
-  --accent: #2563eb;
+  --accent: #0a6dff;
   --accent-soft: #e8f0ff;
+  --brand-green: #5aa74d;
+  --brand-green-soft: #eef7ea;
+  --brand-dark: #16316f;
   --border: #dfe7f1;
   --shadow: 0 14px 36px rgba(20, 33, 61, 0.08);
   --live: #e63946;
@@ -20,28 +23,85 @@ body {
   margin: 0;
   font-family: "Inter", "Segoe UI", Roboto, Arial, sans-serif;
   color: var(--text);
-  background: linear-gradient(135deg, #f6f9ff 0%, var(--bg) 100%);
+  background: linear-gradient(135deg, #eef4f8 0%, var(--bg) 100%);
   line-height: 1.5;
 }
 
 .page-shell {
-  max-width: 960px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 1.2rem 1rem 2.5rem;
+  padding: 1.4rem 1.1rem 2.5rem;
 }
 
 .hero {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 1.25rem;
+  background: linear-gradient(135deg, var(--brand-green-soft) 0%, #eef4ff 100%);
+  border: 1px solid rgba(16, 61, 120, 0.08);
+  border-radius: 28px;
+  padding: 1.4rem;
   box-shadow: var(--shadow);
+}
+
+.hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.club-logo {
+  width: 72px;
+  min-width: 72px;
+  height: auto;
+  border-radius: 18px;
+  background: white;
+  padding: 0.35rem;
+  border: 1px solid rgba(16, 61, 120, 0.14);
+  box-shadow: 0 10px 20px rgba(20, 33, 61, 0.08);
+}
+
+.hero-details {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.hero-description {
+  margin: 0;
+  color: var(--text);
+  max-width: 44rem;
+  font-size: 1rem;
+}
+
+.hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(16, 61, 120, 0.08);
+  color: var(--brand-dark);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.badge-live {
+  background: var(--brand-green);
+  color: white;
 }
 
 .status-banner {
   margin-top: 1rem;
-  padding: 0.85rem 1rem;
-  border-radius: 16px;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
   background: #eef4ff;
   color: #1d3a7d;
   font-size: 0.95rem;
@@ -86,7 +146,7 @@ h1 {
 
 .panel {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(31, 81, 141, 0.08);
   border-radius: 24px;
   padding: 1rem;
   box-shadow: var(--shadow);
@@ -345,8 +405,13 @@ h2 {
     padding: 1.6rem 1.4rem 3rem;
   }
 
+  .hero {
+    padding: 1.8rem;
+  }
+
   .content {
     gap: 1.15rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .match-versus {

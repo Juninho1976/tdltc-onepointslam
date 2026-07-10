@@ -117,6 +117,8 @@ var hasLoadedResults = false;
 var pollingIntervalId = null;
 var latestRequestId = 0;
 var lastRenderedRequestId = 0;
+var currentDataHash = "";
+var pendingUpdate = null;
 
 function buildDataSummary(matches) {
   if (!Array.isArray(matches)) {
@@ -173,6 +175,64 @@ window.addEventListener && window.addEventListener("error", function (evt) {
  * Load tournament data CSV with diagnostics and timeout.
  * Returns a Promise that resolves to parsed rows array.
  */
+function getDataSignature(matches) {
+  if (!Array.isArray(matches)) {
+    return "";
+  }
+
+  var parts = [];
+  for (var i = 0; i < matches.length; i += 1) {
+    var row = matches[i] || {};
+    parts.push(
+      String(row.match || "") + "|" +
+      String(row.round || "") + "|" +
+      String(row.player1 || "") + "|" +
+      String(row.player2 || "") + "|" +
+      String(row.winner || "") + "|" +
+      String(row.status || "")
+    );
+  }
+
+  return parts.join(";;");
+}
+
+function applyTournamentData(result) {
+  console.log("[diagnostic] applyTournamentData requestId=", result.requestId, "dataHash=", result.dataHash, "rows=", (result.rows && result.rows.length) || 0);
+  renderResults(result.rows, result.requestId, result.fetchedAt);
+  currentDataHash = result.dataHash;
+  pendingUpdate = null;
+}
+
+function processFetchedResult(result) {
+  var dataHash = getDataSignature(result.rows);
+  result.dataHash = dataHash;
+  console.log("[diagnostic] processFetchedResult requestId=", result.requestId, "dataHash=", dataHash, "currentDataHash=", currentDataHash, "pendingHash=", pendingUpdate && pendingUpdate.dataHash);
+
+  if (!currentDataHash) {
+    applyTournamentData(result);
+    return;
+  }
+
+  if (dataHash === currentDataHash) {
+    console.log("[diagnostic] fetched data matches current display; no render needed for requestId=", result.requestId);
+    pendingUpdate = null;
+    return;
+  }
+
+  if (pendingUpdate && pendingUpdate.dataHash === dataHash) {
+    console.log("[diagnostic] stable new version confirmed for requestId=", result.requestId);
+    applyTournamentData(result);
+    return;
+  }
+
+  pendingUpdate = {
+    dataHash: dataHash,
+    result: result,
+    firstSeenAt: Date.now(),
+  };
+  console.log("[diagnostic] pending update stored for stability check, requestId=", result.requestId, "dataHash=", dataHash);
+}
+
 function loadTournamentData(requestId) {
   return new Promise(function (resolve, reject) {
     var stage = "init";
@@ -684,12 +744,7 @@ function refreshTournamentData() {
       console.warn("[diagnostic] Ignoring stale response requestId=", result.requestId, "latestRequestId=", latestRequestId);
       return;
     }
-    try {
-      renderResults(result.rows, result.requestId, result.fetchedAt);
-    } catch (err) {
-      console.error("Error during renderResults:", err);
-      showErrorState("Rendering error. See console for details.");
-    }
+    processFetchedResult(result);
   }).catch(function (error) {
     console.error("Failed to load tournament data for requestId=", requestId, error);
     if (requestId !== latestRequestId) {

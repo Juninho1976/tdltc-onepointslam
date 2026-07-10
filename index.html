@@ -13,11 +13,27 @@
   <body>
     <div class="page-shell">
       <header class="hero">
-        <p class="eyebrow">Tournament updates</p>
-        <h1 id="tournament-title">TDLTC One Point Slam</h1>
-        <p class="lead">
-          A live scoreboard-style view of tournament activity from the published Google Sheet.
-        </p>
+        <div class="hero-brand">
+          <img src="club-logo.jpg" alt="TDLTC logo" class="club-logo" />
+          <div>
+            <p class="eyebrow">Club scoreboard</p>
+            <h1 id="tournament-title">TDLTC One Point Slam</h1>
+            <p class="lead">
+              A live scoreboard-style view of tournament activity from the published Google Sheet.
+            </p>
+          </div>
+        </div>
+
+        <div class="hero-details">
+          <p class="hero-description">
+            Fast updates for players and club members. The page auto-refreshes in the background so you can keep watching the draw and standings.
+          </p>
+          <div class="hero-badges">
+            <span class="badge badge-live">Live scoreboard</span>
+            <span class="badge">Auto-refresh</span>
+          </div>
+        </div>
+
         <div id="status-banner" class="status-banner" aria-live="polite"></div>
       </header>
 
