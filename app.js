@@ -233,142 +233,257 @@ function processFetchedResult(result) {
   console.log("[diagnostic] pending update stored for stability check, requestId=", result.requestId, "dataHash=", dataHash);
 }
 
+function makeTournamentRecordFromObject(record) {
+  return {
+    match: getValueFromRecord(record, ["match", "matchnumber", "match #"]),
+    round: getValueFromRecord(record, ["round", "roundname", "stage"]),
+    player1: getValueFromRecord(record, ["player1", "player 1", "p1", "team1"]),
+    player2: getValueFromRecord(record, ["player2", "player 2", "p2", "team2"]),
+    winner: getValueFromRecord(record, ["winner", "winnername", "winningplayer"]),
+    status: getValueFromRecord(record, ["status", "outcome", "result"]),
+  };
+}
+
+function parseGvizResponseText(rawText) {
+  var text = String(rawText || "").trim();
+  if (!text) {
+    throw new Error("GViz response is empty");
+  }
+
+  var jsonText = text;
+  var prefix = "google.visualization.Query.setResponse(";
+  var prefixIndex = jsonText.indexOf(prefix);
+
+  if (prefixIndex !== -1) {
+    var start = jsonText.indexOf("(", prefixIndex);
+    var end = jsonText.lastIndexOf(")");
+    if (start !== -1 && end !== -1 && end > start) {
+      jsonText = jsonText.slice(start + 1, end);
+    }
+  } else if (jsonText.indexOf("/*O_o*/") === 0) {
+    var firstBrace = jsonText.indexOf("{");
+    if (firstBrace !== -1) {
+      jsonText = jsonText.slice(firstBrace);
+    }
+  } else {
+    var firstBrace2 = jsonText.indexOf("{");
+    var lastBrace = jsonText.lastIndexOf("}");
+    if (firstBrace2 !== -1 && lastBrace !== -1 && lastBrace > firstBrace2) {
+      jsonText = jsonText.slice(firstBrace2, lastBrace + 1);
+    }
+  }
+
+  var parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    throw new Error("GViz JSON parse failed: " + (error && error.message));
+  }
+
+  if (!parsed || !parsed.table || !Array.isArray(parsed.table.cols) || !Array.isArray(parsed.table.rows)) {
+    throw new Error("GViz response format was unexpected");
+  }
+
+  var headers = parsed.table.cols.map(function (col) {
+    return normalizeHeader((col && col.label) || (col && col.id) || "");
+  });
+
+  var records = [];
+  for (var rowIndex = 0; rowIndex < parsed.table.rows.length; rowIndex += 1) {
+    var row = parsed.table.rows[rowIndex];
+    if (!row || !Array.isArray(row.c)) {
+      continue;
+    }
+    var cells = row.c;
+    var record = {};
+    for (var headerIndex = 0; headerIndex < headers.length; headerIndex += 1) {
+      var headerName = headers[headerIndex] || "col" + headerIndex;
+      var cell = cells[headerIndex];
+      var value = "";
+      if (cell !== null && cell !== undefined) {
+        if (cell.v !== undefined && cell.v !== null) {
+          value = cell.v;
+        } else if (cell.f !== undefined && cell.f !== null) {
+          value = cell.f;
+        }
+      }
+      record[headerName] = value;
+    }
+    records.push(record);
+  }
+
+  return records.map(makeTournamentRecordFromObject);
+}
+
+function buildGvizUrl() {
+  if (!CONFIG || !CONFIG.RESULTS_SHEET_ID || !CONFIG.RESULTS_GID) {
+    return null;
+  }
+
+  return (
+    "https://docs.google.com/spreadsheets/d/" +
+    CONFIG.RESULTS_SHEET_ID +
+    "/gviz/tq?tqx=out:json&gid=" +
+    CONFIG.RESULTS_GID
+  );
+}
+
 function loadTournamentData(requestId) {
   return new Promise(function (resolve, reject) {
     var stage = "init";
     var startedAt = Date.now();
-    var url = (typeof CONFIG !== "undefined" && CONFIG.RESULTS_CSV_URL) ? CONFIG.RESULTS_CSV_URL : null;
+    var csvUrl = (typeof CONFIG !== "undefined" && CONFIG.RESULTS_CSV_URL) ? CONFIG.RESULTS_CSV_URL : null;
+    var gvizUrl = buildGvizUrl();
     console.log("[diagnostic] loadTournamentData requestId=", requestId, "started at", new Date(startedAt).toISOString());
 
-    if (!url) {
-      var err = new Error("No CSV URL configured (CONFIG.RESULTS_CSV_URL)");
+    if (!gvizUrl && !csvUrl) {
+      var err = new Error("No sheet URL configured.");
       console.error(err);
-      showErrorState("Configuration error: missing CSV URL.");
+      showErrorState("Configuration error: missing sheet URL.");
       return reject(err);
     }
 
-    // Track progress to report if we stall
-    var stallTimer = setTimeout(function () {
-      if (requestId !== latestRequestId) {
-        return;
-      }
-      var elapsed = Math.round((Date.now() - startedAt) / 1000);
-      var msg = "Loading stalled (" + stage + ") after " + elapsed + "s";
-      console.warn(msg);
-      setStatusMessage(msg, "status-warning");
-      if (!hasLoadedResults) {
-        showErrorState("Loading stalled while fetching tournament data. Please try again.");
-      }
-    }, 10000);
-
-    stage = "fetching";
-    console.log("[diagnostic] Fetching CSV from:", url);
-    if (requestId === latestRequestId) {
-      setStatusMessage("Fetching data...");
-    }
-
     var controller = null;
-    var timerId = null;
     try {
       controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     } catch (e) {
       controller = null;
     }
 
-    // add a cache-busting param and keep same semantics as before
-    var fetchUrl = url + (url.indexOf("?") === -1 ? "?" : "&") + "t=" + Date.now();
-
     var fetchOptions = { method: "GET" };
     if (controller && controller.signal) {
       fetchOptions.signal = controller.signal;
     }
 
-    var fetchStart = Date.now();
+    function createFetchUrl(url) {
+      return url + (url.indexOf("?") === -1 ? "?" : "&") + "t=" + Date.now();
+    }
 
-    // 10s timeout
-    timerId = setTimeout(function () {
+    function parseResponseText(text, isGviz) {
+      if (isGviz) {
+        return parseGvizResponseText(text || "");
+      }
+      return parseTournamentRows(text || "");
+    }
+
+    function doFetch(url, isGviz) {
+      stage = isGviz ? "fetching-direct-sheet" : "fetching-csv";
+      var fetchUrl = createFetchUrl(url);
+      var fetchStart = Date.now();
+      var timerId = null;
+      var stallTimer = setTimeout(function () {
+        if (requestId !== latestRequestId) {
+          return;
+        }
+        var elapsed = Math.round((Date.now() - startedAt) / 1000);
+        var msg = "Loading stalled (" + stage + ") after " + elapsed + "s";
+        console.warn(msg);
+        setStatusMessage(msg, "status-warning");
+        if (!hasLoadedResults) {
+          showErrorState("Loading stalled while fetching tournament data. Please try again.");
+        }
+      }, 10000);
+
+      if (requestId === latestRequestId) {
+        setStatusMessage("Fetching data...");
+      }
+
       try {
         if (controller && controller.abort) {
-          controller.abort();
+          timerId = setTimeout(function () {
+            try {
+              controller.abort();
+            } catch (e) {
+              console.warn("Abort failed:", e);
+            }
+          }, 10000);
         }
-      } catch (e) {
-        console.warn("Abort failed:", e);
-      }
-    }, 10000);
 
-    // perform fetch
-    try {
-      window.fetch(fetchUrl, fetchOptions).then(function (response) {
-        clearTimeout(timerId);
-        stage = "received";
-        var tookMs = Date.now() - fetchStart;
-        console.log("[diagnostic] Fetch completed: status=", response.status, "tookMs=", tookMs);
-
-        if (!response || !response.ok) {
-          var msg = "CSV fetch returned HTTP " + (response && response.status);
-          console.error(msg);
-          clearTimeout(stallTimer);
-          if (requestId === latestRequestId) {
-            showErrorState("The tournament sheet could not be reached (HTTP " + (response && response.status) + ").");
+        window.fetch(fetchUrl, fetchOptions).then(function (response) {
+          if (timerId) {
+            clearTimeout(timerId);
           }
-          return reject(new Error(msg));
-        }
+          clearTimeout(stallTimer);
+          stage = isGviz ? "direct-sheet-received" : "csv-received";
+          var tookMs = Date.now() - fetchStart;
+          console.log("[diagnostic] Fetch completed (" + (isGviz ? "gviz" : "csv") + "): status=", response.status, "tookMs=", tookMs, "requestId=", requestId);
 
-        stage = "reading";
-        // read as text
-        response.text().then(function (text) {
-          stage = "parsing";
-          console.log("[diagnostic] Received CSV length:", text ? text.length : 0);
-          var parsed = [];
-          try {
-            parsed = parseTournamentRows(text || "");
-          } catch (err) {
-            console.error("CSV parse error:", err);
-            clearTimeout(stallTimer);
+          if (!response || !response.ok) {
+            var msg = "Fetch returned HTTP " + (response && response.status);
+            console.error(msg);
+            if (!isGviz && requestId === latestRequestId) {
+              showErrorState("The tournament sheet could not be reached (HTTP " + (response && response.status) + ").");
+            }
+            return reject(new Error(msg));
+          }
+
+          response.text().then(function (text) {
+            stage = isGviz ? "direct-sheet-parsing" : "csv-parsing";
+            console.log("[diagnostic] Received text length=", text ? text.length : 0, "requestId=", requestId);
+            var parsed = [];
+            try {
+              parsed = parseResponseText(text, isGviz);
+            } catch (err) {
+              console.error((isGviz ? "GViz" : "CSV") + " parse error:", err);
+              return reject(err);
+            }
+
+            console.log("[diagnostic] Parsed rows:", parsed.length, "requestId=", requestId, "source=", isGviz ? "gviz" : "csv");
             if (requestId === latestRequestId) {
-              showErrorState("Failed to parse tournament data.");
+              setStatusMessage("Fetched " + parsed.length + " rows", "status-success");
+            }
+            return resolve({
+              requestId: requestId,
+              fetchedAt: fetchStart,
+              completedAt: Date.now(),
+              rows: parsed,
+              source: isGviz ? "gviz" : "csv",
+            });
+          }).catch(function (err) {
+            console.error("Error reading response text for requestId=", requestId, err);
+            if (requestId === latestRequestId) {
+              showErrorState("Failed to read tournament data.");
             }
             return reject(err);
-          }
-
-          console.log("[diagnostic] Parsed rows:", parsed.length, "for requestId=", requestId);
-          clearTimeout(stallTimer);
-          stage = "done";
-          if (requestId === latestRequestId) {
-            setStatusMessage("Fetched " + parsed.length + " rows", "status-success");
-          }
-          return resolve({
-            requestId: requestId,
-            fetchedAt: fetchStart,
-            completedAt: Date.now(),
-            rows: parsed,
           });
         }).catch(function (err) {
-          console.error("Error reading response text for requestId=", requestId, err);
-          clearTimeout(stallTimer);
-          if (requestId === latestRequestId) {
-            showErrorState("Failed to read tournament data.");
+          if (timerId) {
+            clearTimeout(timerId);
           }
+          clearTimeout(stallTimer);
+          console.error("Fetch failed for requestId=", requestId, err);
           return reject(err);
         });
-      }).catch(function (err) {
-        clearTimeout(timerId);
-        clearTimeout(stallTimer);
-        console.error("Fetch failed for requestId=", requestId, err);
-        var message = (err && err.name === "AbortError") ? "Request timed out." : "Network error while fetching data.";
-        if (requestId === latestRequestId) {
-          showErrorState(message);
+      } catch (err) {
+        if (timerId) {
+          clearTimeout(timerId);
         }
+        clearTimeout(stallTimer);
+        console.error("Unexpected error during fetch for requestId=", requestId, err);
         return reject(err);
-      });
-    } catch (err) {
-      clearTimeout(timerId);
-      clearTimeout(stallTimer);
-      console.error("Unexpected error during fetch for requestId=", requestId, err);
-      if (requestId === latestRequestId) {
-        showErrorState("Unexpected error while fetching data.");
       }
-      return reject(err);
+    }
+
+    function fallbackToCsv(reason) {
+      if (!csvUrl) {
+        return reject(reason);
+      }
+      console.warn("[diagnostic] Direct sheet access failed, falling back to CSV for requestId=", requestId, "reason=", reason);
+      if (requestId === latestRequestId) {
+        setStatusMessage("Direct sheet failed, trying CSV fallback...", "status-warning");
+      }
+      doFetch(csvUrl, false);
+    }
+
+    if (gvizUrl) {
+      doFetch(gvizUrl, true).catch(function (err) {
+        if (requestId !== latestRequestId) {
+          return reject(err);
+        }
+        fallbackToCsv(err);
+      });
+    } else {
+      doFetch(csvUrl, false);
     }
   });
 }
