@@ -208,29 +208,20 @@ function processFetchedResult(result) {
   result.dataHash = dataHash;
   console.log("[diagnostic] processFetchedResult requestId=", result.requestId, "dataHash=", dataHash, "currentDataHash=", currentDataHash, "pendingHash=", pendingUpdate && pendingUpdate.dataHash);
 
-  if (!currentDataHash) {
-    applyTournamentData(result);
-    return;
-  }
-
   if (dataHash === currentDataHash) {
     console.log("[diagnostic] fetched data matches current display; no render needed for requestId=", result.requestId);
     pendingUpdate = null;
     return;
   }
 
-  if (pendingUpdate && pendingUpdate.dataHash === dataHash) {
-    console.log("[diagnostic] stable new version confirmed for requestId=", result.requestId);
+  if (!currentDataHash || !pendingUpdate || pendingUpdate.dataHash !== dataHash) {
+    console.log("[diagnostic] applying new data for requestId=", result.requestId);
     applyTournamentData(result);
     return;
   }
 
-  pendingUpdate = {
-    dataHash: dataHash,
-    result: result,
-    firstSeenAt: Date.now(),
-  };
-  console.log("[diagnostic] pending update stored for stability check, requestId=", result.requestId, "dataHash=", dataHash);
+  console.log("[diagnostic] pending update confirmed for requestId=", result.requestId);
+  applyTournamentData(result);
 }
 
 function makeTournamentRecordFromObject(record) {
@@ -334,6 +325,7 @@ function loadTournamentData(requestId) {
     var startedAt = Date.now();
     var csvUrl = (typeof CONFIG !== "undefined" && CONFIG.RESULTS_CSV_URL) ? CONFIG.RESULTS_CSV_URL : null;
     var gvizUrl = buildGvizUrl();
+    var jsonUrl = (typeof CONFIG !== "undefined" && CONFIG.RESULTS_JSON_URL) ? CONFIG.RESULTS_JSON_URL : null;
     console.log("[diagnostic] loadTournamentData requestId=", requestId, "started at", new Date(startedAt).toISOString());
 
     if (!gvizUrl && !csvUrl) {
@@ -364,6 +356,118 @@ function loadTournamentData(requestId) {
         return parseGvizResponseText(text || "");
       }
       return parseTournamentRows(text || "");
+    }
+
+    function doFetchJson(url) {
+      stage = "fetching-json";
+      var fetchUrl = createFetchUrl(url);
+      var fetchStart = Date.now();
+      var timerId = null;
+      var stallTimer = setTimeout(function () {
+        if (requestId !== latestRequestId) {
+          return;
+        }
+        var elapsed = Math.round((Date.now() - startedAt) / 1000);
+        var msg = "Loading stalled (json) after " + elapsed + "s";
+        console.warn(msg);
+        setStatusMessage(msg, "status-warning");
+        if (!hasLoadedResults) {
+          showErrorState("Loading stalled while fetching tournament data. Please try again.");
+        }
+      }, 10000);
+
+      if (requestId === latestRequestId) {
+        setStatusMessage("Fetching data (JSON endpoint)...");
+      }
+
+      try {
+        if (controller && controller.abort) {
+          timerId = setTimeout(function () {
+            try {
+              controller.abort();
+            } catch (e) {
+              console.warn("Abort failed:", e);
+            }
+          }, 10000);
+        }
+
+        return window.fetch(fetchUrl, fetchOptions).then(function (response) {
+          if (timerId) {
+            clearTimeout(timerId);
+          }
+          clearTimeout(stallTimer);
+          stage = "json-received";
+          var tookMs = Date.now() - fetchStart;
+          console.log("[diagnostic] Fetch completed (json): status=", response.status, "tookMs=", tookMs, "requestId=", requestId);
+
+          if (!response || !response.ok) {
+            var msg = "Fetch returned HTTP " + (response && response.status);
+            console.error(msg);
+            return reject(new Error(msg));
+          }
+
+          response.json().then(function (json) {
+            stage = "json-parsing";
+            var parsed = [];
+            try {
+              if (Array.isArray(json)) {
+                parsed = json.map(function (orig) {
+                  var normalized = {};
+                  Object.keys(orig || {}).forEach(function (k) {
+                    normalized[normalizeHeader(k)] = orig[k];
+                  });
+                  return makeTournamentRecordFromObject(normalized);
+                });
+              } else if (json && Array.isArray(json.rows)) {
+                parsed = json.rows.map(function (r) {
+                  var normalized = {};
+                  Object.keys(r || {}).forEach(function (k) {
+                    normalized[normalizeHeader(k)] = r[k];
+                  });
+                  return makeTournamentRecordFromObject(normalized);
+                });
+              } else {
+                parsed = [];
+              }
+            } catch (err) {
+              console.error("JSON parse/transform error:", err);
+              return reject(err);
+            }
+
+            console.log("[diagnostic] Parsed rows from JSON:", parsed.length, "requestId=", requestId);
+            if (requestId === latestRequestId) {
+              setStatusMessage("Fetched " + parsed.length + " rows", "status-success");
+            }
+            return resolve({
+              requestId: requestId,
+              fetchedAt: fetchStart,
+              completedAt: Date.now(),
+              rows: parsed,
+              source: "json",
+            });
+          }).catch(function (err) {
+            console.error("Error reading JSON response for requestId=", requestId, err);
+            if (requestId === latestRequestId) {
+              showErrorState("Failed to read tournament JSON data.");
+            }
+            return reject(err);
+          });
+        }).catch(function (err) {
+          if (timerId) {
+            clearTimeout(timerId);
+          }
+          clearTimeout(stallTimer);
+          console.error("Fetch failed for requestId=", requestId, err);
+          return reject(err);
+        });
+      } catch (err) {
+        if (timerId) {
+          clearTimeout(timerId);
+        }
+        clearTimeout(stallTimer);
+        console.error("Unexpected error during fetch for requestId=", requestId, err);
+        return reject(err);
+      }
     }
 
     function doFetch(url, isGviz) {
@@ -399,7 +503,7 @@ function loadTournamentData(requestId) {
           }, 10000);
         }
 
-        window.fetch(fetchUrl, fetchOptions).then(function (response) {
+        return window.fetch(fetchUrl, fetchOptions).then(function (response) {
           if (timerId) {
             clearTimeout(timerId);
           }
@@ -475,7 +579,24 @@ function loadTournamentData(requestId) {
       doFetch(csvUrl, false);
     }
 
-    if (gvizUrl) {
+    if (jsonUrl) {
+      doFetchJson(jsonUrl).catch(function (err) {
+        if (requestId !== latestRequestId) {
+          return reject(err);
+        }
+        console.warn("[diagnostic] JSON endpoint failed, falling back to GViz/CSV, reason=", err);
+        if (gvizUrl) {
+          doFetch(gvizUrl, true).catch(function (err2) {
+            if (requestId !== latestRequestId) {
+              return reject(err2);
+            }
+            fallbackToCsv(err2);
+          });
+        } else {
+          fallbackToCsv(err);
+        }
+      });
+    } else if (gvizUrl) {
       doFetch(gvizUrl, true).catch(function (err) {
         if (requestId !== latestRequestId) {
           return reject(err);
@@ -800,33 +921,54 @@ function renderTournamentDraw(matches) {
 }
 
 function renderResults(data, requestId, fetchedAt) {
-  console.log("[diagnostic] renderResults requestId=", requestId, "fetchedAt=", new Date(fetchedAt).toISOString(), "rows=", data.length, "summary=", buildDataSummary(data));
-  var titleElement = document.getElementById("tournament-title");
-  if (titleElement) {
-    titleElement.textContent = CONFIG.TOURNAMENT_NAME;
-  }
-
-  document.title = CONFIG.TOURNAMENT_NAME;
-
-  if (!Array.isArray(data) || data.length === 0) {
-    console.log("[diagnostic] renderResults no data for requestId=", requestId);
-    if (!hasLoadedResults) {
-      showErrorState("No tournament data is available yet.");
+  try {
+    console.log("[diagnostic] renderResults requestId=", requestId, "fetchedAt=", new Date(fetchedAt).toISOString(), "rows=", data.length, "summary=", buildDataSummary(data));
+    var titleElement = document.getElementById("tournament-title");
+    if (titleElement) {
+      titleElement.textContent = CONFIG.TOURNAMENT_NAME;
     }
-    return;
+
+    document.title = CONFIG.TOURNAMENT_NAME;
+
+    if (!Array.isArray(data) || data.length === 0) {
+      console.log("[diagnostic] renderResults no data for requestId=", requestId);
+      if (!hasLoadedResults) {
+        showErrorState("No tournament data is available yet.");
+      }
+      return;
+    }
+
+    if (requestId < lastRenderedRequestId) {
+      console.warn("[diagnostic] renderResults ignoring stale requestId=", requestId, "lastRenderedRequestId=", lastRenderedRequestId);
+      return;
+    }
+
+    console.log("[diagnostic] Rendering results: rows=", data.length, "requestId=", requestId);
+
+    renderLiveMatch(data);
+    renderNextMatch(data);
+    renderProgressSummary(data);
+    renderTournamentDraw(data);
+
+    console.log("[diagnostic] Finished rendering results for requestId=", requestId);
+
+    lastRenderedRequestId = requestId;
+    hasLoadedResults = true;
+
+    var now = new Date();
+    var timeLabel = now.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    setStatusMessage("Last updated: " + timeLabel, "status-success");
+  } catch (error) {
+    console.error("renderResults failed for requestId=", requestId, error);
+    setStatusMessage("Error rendering tournament data. See console.", "status-warning");
+    if (!hasLoadedResults) {
+      showErrorState("Unable to display tournament data right now.");
+    }
   }
-
-  if (requestId < lastRenderedRequestId) {
-    console.warn("[diagnostic] renderResults ignoring stale requestId=", requestId, "lastRenderedRequestId=", lastRenderedRequestId);
-    return;
-  }
-
-  console.log("[diagnostic] Rendering results: rows=", data.length, "requestId=", requestId);
-
-  renderLiveMatch(data);
-  renderNextMatch(data);
-  renderProgressSummary(data);
-  renderTournamentDraw(data);
 
   console.log("[diagnostic] Finished rendering results for requestId=", requestId);
 
